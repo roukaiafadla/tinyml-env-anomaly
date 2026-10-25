@@ -1,14 +1,13 @@
 """Train a dense autoencoder (default 3->8->2->8->3) and select the anomaly threshold.
 
 Synthetic run (pipeline development only, never report these numbers):
-    python ml/train_autoencoder.py --train data/synthetic/fake_normal.csv ^
-        --eval data/synthetic/fake_anomaly.csv --outdir models/synthetic
-Real run:
-    python ml/train_autoencoder.py --train data/raw/session_X.csv ^
-        --eval data/raw/anomaly_test_X.csv --outdir models/real
+    python ml/train_autoencoder.py --train data/synthetic/fake_normal.csv --eval data/synthetic/fake_anomaly.csv --outdir models/synthetic
+Real run, one or several sessions:
+    python ml/train_autoencoder.py --train data/raw/session_A.csv data/raw/session_B.csv --outdir models/real
 Options:
     --noise 0.15        denoising autoencoder (Gaussian noise on inputs, training only)
     --bottleneck 1      smaller latent code
+    --block 60          rows per split block (default 180 = 15 min); use less with little data
     --features temp_c hum_pct light_raw motion     (needs a light sensor)
     --verbose           print every epoch
 """
@@ -23,11 +22,10 @@ from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
 
 DEFAULT_FEATURES = ["temp_c", "hum_pct", "motion"]
 SKIP_AFTER_BOOT = 12   # drop ~60 s after each ESP32 reboot (sensors still settling)
-BLOCK = 180            # 15 min of rows; unit of the block split below
 
 
-def load(path, features):
-    df = pd.read_csv(path, comment="#")
+def load_one(path, features):
+    df = pd.read_csv(path, comment="#", on_bad_lines="skip")
     cols = features + ["t_ms"]
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df = df.dropna(subset=cols).reset_index(drop=True)
@@ -37,17 +35,30 @@ def load(path, features):
     return df
 
 
-def block_split(n):
-    """Contiguous 15-min blocks assigned 14:3:3 (70/15/15) in a repeating 5 h pattern.
+def load(paths, features):
+    """Load one or several session CSVs; each is cleaned separately, then concatenated."""
+    if isinstance(paths, str):
+        paths = [paths]
+    parts = []
+    for i, p in enumerate(paths):
+        d = load_one(p, features)
+        d["session"] = i
+        print(f"  {os.path.basename(p)}: {len(d)} usable rows")
+        parts.append(d)
+    return pd.concat(parts, ignore_index=True)
 
-    WHY not a plain chronological split: with only ~1 day of data, the last 15%
-    would be one time of day that the model never trained on, and the diurnal
-    cycle would be mistaken for anomalies. Blocks keep every time of day
-    represented in train/val/test, and are long enough that neighbouring
-    (autocorrelated) samples rarely straddle two sets. With several days of data,
-    prefer a plain chronological split.
+
+def block_split(n, block):
+    """Contiguous blocks assigned 14:3:3 (70/15/15) in a repeating 20-block pattern.
+
+    WHY not a plain chronological split: with only a day or less of data, the last
+    15% would be one time of day that the model never trained on, and the diurnal
+    cycle would be mistaken for anomalies. Blocks keep every time of day represented
+    in train/val/test, and are long enough that neighbouring (autocorrelated)
+    samples rarely straddle two sets. With several days of data, prefer a plain
+    chronological split.
     """
-    slot = (np.arange(n) // BLOCK) % 20
+    slot = (np.arange(n) // block) % 20
     return slot < 14, (slot >= 14) & (slot < 17), slot >= 17
 
 
@@ -77,13 +88,15 @@ def recon_error(model, X):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--train", required=True, help="CSV of NORMAL behaviour")
+    ap.add_argument("--train", nargs="+", required=True, help="one or more CSVs of NORMAL behaviour")
     ap.add_argument("--eval", default=None, help="CSV with a 0/1 'label' column")
     ap.add_argument("--outdir", default="models/real")
     ap.add_argument("--features", nargs="+", default=DEFAULT_FEATURES)
     ap.add_argument("--bottleneck", type=int, default=2)
-    ap.add_argument("--noise", type=float, default=0.15,
+    ap.add_argument("--noise", type=float, default=0.0,
                     help="input noise std (normalized units) for a denoising AE")
+    ap.add_argument("--block", type=int, default=180,
+                    help="rows per split block (180 = 15 min at 5 s)")
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--percentile", type=float, default=95.0)
     ap.add_argument("--seed", type=int, default=0)
@@ -93,9 +106,15 @@ def main():
     keras.utils.set_random_seed(args.seed)
     os.makedirs(args.outdir, exist_ok=True)
 
+    print("sessions:")
     df = load(args.train, features)
     X = df[features].to_numpy("float32")
-    tr, va, te = block_split(len(X))
+    tr, va, te = block_split(len(X), args.block)
+    print(f"total usable rows: {len(X)} (about {len(X) * 5 / 3600:.1f} h)")
+    if va.sum() < 100 or te.sum() < 100:
+        raise SystemExit(
+            f"Not enough data for the block split (val={va.sum()}, test={te.sum()} rows). "
+            f"Collect more data, or use a smaller --block (for example --block 60).")
 
     # Scaler is fitted on TRAIN ONLY, then reused on val/test/eval and on the ESP32.
     mu, sd = X[tr].mean(0), X[tr].std(0)
@@ -128,11 +147,12 @@ def main():
           f"(expected ~{1 - args.percentile / 100:.3f})")
 
     # Diagnostic: is the exceedance rate uniform, or clustered in a few time blocks?
-    blk = (np.arange(len(X)) // BLOCK)[te]
+    blk = (np.arange(len(X)) // args.block)[te]
     for b in np.unique(blk):
         print(f"  test block {b:3d}: exceed rate = {(e_te[blk == b] > tau).mean():.2f}")
 
     if args.eval:
+        print("eval file:")
         de = load(args.eval, features)
         Xe = norm(de[features].to_numpy("float32"))
         y = de["label"].to_numpy().astype(int)
@@ -154,6 +174,7 @@ def main():
     with open(os.path.join(args.outdir, "threshold_float.json"), "w") as f:
         json.dump({"percentile": args.percentile, "tau": tau, "noise": args.noise,
                    "bottleneck": args.bottleneck, "epochs_run": n_ep,
+                   "sessions": [os.path.basename(p) for p in args.train],
                    "fit_on": "validation (held-out normal)", "n_val": int(len(Xva))}, f, indent=2)
 
 
