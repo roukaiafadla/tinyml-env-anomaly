@@ -30,7 +30,7 @@ def load_one(path, features):
     df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
     df = df.dropna(subset=cols).reset_index(drop=True)
     # t_ms resets to 0 on every reboot -> a decrease marks a new boot segment
-    boot = (df["t_ms"].diff() < 0).cumsum()
+    boot = ((df["t_ms"].diff() < 0) & (df["host_ts"].diff() > 20)).cumsum()
     df = df[df.groupby(boot).cumcount() >= SKIP_AFTER_BOOT].reset_index(drop=True)
     return df
 
