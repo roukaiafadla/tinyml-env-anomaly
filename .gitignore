@@ -7,5 +7,6 @@ __pycache__/
 build/
 data/synthetic/
 models/synthetic/
+models/scratch/
 models/*/saved_model/
 *.bad
