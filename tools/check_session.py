@@ -16,9 +16,16 @@ print(f"file: {path}")
 print(f"rows: {len(d)}   duration: {dur_h:.2f} h   expected rows: {int(dur_h * 720) + 1}")
 print(f"start (UTC): {ts.iloc[0]}   end (UTC): {ts.iloc[-1]}")
 
-gaps = d["host_ts"].diff()
-print(f"gaps > 7 s: {int((gaps > 7).sum())}  (largest {gaps.max():.0f} s)")
-print(f"reboots detected: {int((d['t_ms'].diff() < 0).sum())}")
+dh = d["host_ts"].diff()
+dt = d["t_ms"].diff()
+print(f"gaps > 7 s (PC clock): {int((dh > 7).sum())}  (largest {dh.max():.0f} s)")
+
+# A real reboot restarts t_ms AND leaves a hole of 30+ s (the PIR warm-up).
+# A t_ms drop with no hole is a damaged number (leading digits lost in transit).
+drop = dt < 0
+print(f"reboots detected: {int((drop & (dh > 20)).sum())}")
+print(f"t_ms glitches (drop, no hole): {int((drop & (dh <= 20)).sum())}")
+print(f"rows with a missing field: {int(d.isna().any(axis=1).sum())}")
 
 for c in ("temp_c", "hum_pct"):
     print(f"{c}: min {d[c].min()}  max {d[c].max()}  mean {d[c].mean():.2f}  "
