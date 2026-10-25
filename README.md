@@ -94,10 +94,3 @@ model size, arena usage, inference latency)._
 
 ## Known Limitations
 
-- DHT11 accuracy is about ±2 °C / ±5 %RH; humidity changes in 1 %RH steps.
-- No ambient-light sensing: the light module in the kit turned out to be an IR
-  obstacle sensor with a digital output only (see `docs/wiring.md`).
-- Motion is binary per window; no activity-level information.
-- The model is trained on one environment; deployment elsewhere requires retraining.
-- Reconstruction errors are autocorrelated, so false-alarm rates must be calibrated
-  on several days of data (see `docs/methodology.md`).
