@@ -1,0 +1,7 @@
+session: classroom_raw_20261026
+logger: firmware/offline_logger (on-board flash)
+start (local): not recorded
+setting: occupied room with normal activity; exact location and number of people not recorded
+power: not recorded
+rows: 912 (900 usable), about 1.27 h, one continuous boot
+note: extracted without --start, so clock timestamps are approximate

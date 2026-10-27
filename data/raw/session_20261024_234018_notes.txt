@@ -1,0 +1,9 @@
+session: session_20261024_234018
+logger: firmware/data_logger (USB serial) + tools/serial_logger.py
+start (local, UTC+1): 23:40:18 (port opened), first row 23:40:49
+end (local): about 01:00 on 25 Oct
+rows: 953 (941 usable)
+setting: private room; little movement near the sensors, room mostly unoccupied
+events:
+- about 23:42:24: hand wave in front of the PIR (deliberate test, kept as normal motion)
+- 3 pauses of the PC logger (largest 101 s): host timestamps unreliable for those rows, t_ms intact

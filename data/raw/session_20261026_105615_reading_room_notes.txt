@@ -1,0 +1,10 @@
+session: session_20261026_105615_reading_room
+logger: firmware/offline_logger (on-board flash), board connected to a laptop in the reading room
+start (local, UTC+1): 10:56:15 (board booted when the laptop opened the serial port), first row about 10:57
+end (local): about 15:33
+rows: 3324 extracted from the board (boots 3 and 5); 3300 usable. The 12 rows of boot 5 were logged after the session and are dropped by the loader.
+setting: occupied reading room (salle de lecture)
+events:
+- the PC logger script ran during the session but captured only status lines; the readings were recovered from the board's flash with tools/offline_dump.py
+- humidity fell steadily from about 43 % to 29 % during the session
+- near the end of the session the board was handled; no visible effect in the data

@@ -1,0 +1,10 @@
+session: session_20261025_134557
+logger: firmware/data_logger (USB serial) + tools/serial_logger.py
+start (local, UTC+1): 13:45:57 (port opened), first row 13:46:45
+end (local): 16:15:20
+rows: 1784 (1772 usable)
+setting: same private room as session_20261024_234018, placement unchanged; little movement near the sensors
+events:
+- 13:38 first attempt discarded (the same row was repeated; capture looked faulty); logging restarted at 13:45:57
+- 25 damaged t_ms values (leading digits lost in transit); the board did not reboot and the measurements are intact
+- 13:54:50 to 13:57:26 the PC logger paused (probably text selected in the console); 31 rows have wrong host timestamps, t_ms intact
