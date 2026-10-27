@@ -1,10 +1,10 @@
 # TinyML Environmental Anomaly Detection on ESP32
 
-**An embedded machine-learning project exploring unsupervised environmental anomaly detection under microcontroller constraints.**
+**An end-to-end embedded machine-learning project: unsupervised anomaly detection for indoor environmental data, designed to run on a microcontroller.**
 
-This project combines real sensor-data acquisition, lightweight neural-network training, INT8 quantization, and an ESP32-based deployment workflow. The objective is to identify unusual indoor environmental observations from temperature, humidity and motion data, without cloud inference and without labeled anomalies during training.
+A compact autoencoder (101 parameters, 3,440 bytes as an INT8 TensorFlow Lite model) learns what normal temperature, humidity and motion readings look like and flags deviations through reconstruction error. The goal is local inference on an ESP32, with no cloud connection and no labeled anomalies during training.
 
-> **Project status:** Real sensor-data acquisition, model training and INT8 conversion have been completed for the current experiment. Reliable anomaly detection and on-device inference have **not** yet been validated.
+> **Project status (27 Oct 2026):** data acquisition, model training and INT8 conversion are complete for the current experiment. Labeled evaluation and on-device inference are the next milestones and are not yet validated.
 
 ## Overview
 
@@ -22,40 +22,28 @@ This project combines real sensor-data acquisition, lightweight neural-network t
 | Intended inference | Local execution using TensorFlow Lite Micro |
 | Cloud dependency | None intended for inference |
 
+## Highlights
+
+- **End-to-end workflow:** from sensor logging on the ESP32 to a quantized model and exported firmware constants, with every step scripted and reproducible.
+- **Standalone data logger:** firmware that stores checksummed 32-byte records in the board's flash, so it can record without a PC. A 4.6-hour run was extracted with no record failing its checksum.
+- **Data-quality tooling:** session reports that detect gaps, reboots and damaged values. They exposed corrupted timestamps on the USB serial path, which motivated checksumming the stored records.
+- **Careful evaluation:** block-wise data split, per-block false-alarm diagnostics, and a separate threshold calibrated on the INT8 model.
+
 ## Why this project?
 
 Environmental monitoring often relies on fixed thresholds, such as an alert when temperature exceeds a limit. Independent thresholds do not capture every unusual pattern across several sensor signals.
 
 This project investigates whether a compact autoencoder can learn typical environmental observations and flag deviations through reconstruction error. The challenge extends beyond model training: an embedded system must also handle sensor acquisition, preprocessing, threshold calibration, quantization effects, memory limits and false alarms.
 
-The work therefore follows an experimental workflow: collect real data, train and evaluate a compact model, convert it to INT8, and validate it on the target hardware.
-
 ## System architecture
 
-```mermaid
-flowchart TD
-    A["DHT11<br/>Temperature and humidity"]
-    B["PIR sensor<br/>Motion"]
-    C["ESP32 sensor acquisition"]
-    D["Data logging<br/>USB serial or on-board flash"]
-    E["CSV extraction and validation"]
-    F["Preprocessing and normalization"]
-    G["Autoencoder training"]
-    H["INT8 TFLite conversion"]
-    I["ESP32 inference<br/>TFLite Micro"]
-    J["Reconstruction error<br/>and threshold comparison"]
-    K["OLED / LED alert"]
+![Pipeline from sensors to on-device alerting](docs/images/architecture.png)
 
-    A --> C
-    B --> C
-    C --> D --> E --> F --> G --> H
-    H -. "Pending hardware validation" .-> I
-    I --> J --> K
-```
+*Pipeline overview (illustration). The dashed path, on-device inference and alerting, is the part still pending hardware validation.*
 
 **Implemented:** sensor acquisition, data logging, data extraction, session inspection, model training and INT8 model conversion.
 
-**In progress:** validated on-device inference, embedded anomaly scoring, alert behavior and end-to-end evaluation. The OLED and LED are part of the intended design; their integration with the inference pipeline is not claimed as validated.
+**Next:** validated on-device inference, embedded anomaly scoring, alert behavior and end-to-end evaluation. The OLED and LED are part of the intended design; their integration with the inference pipeline is not yet claimed as validated.
 
 ## Hardware
 
@@ -64,11 +52,13 @@ flowchart TD
 | ESP32 DevKit | Sensor acquisition and target inference platform | — |
 | DHT11 module | Temperature and relative humidity | GPIO 4 |
 | HC-SR501 PIR | Motion detection | GPIO 27 |
-| SSD1306 128×64 OLED | Intended status display | I²C, GPIO 21/22 |
-| LED with 220 Ω resistor | Intended visual indicator | GPIO 26 |
+| SSD1306 128×64 OLED | Status display | I²C, GPIO 21/22 |
+| LED with 220 Ω resistor | Heartbeat in the loggers; planned anomaly alert | GPIO 26 |
 
 The initial design included an LDR light sensor, but no usable module was available, so the current implementation uses three input features instead of four. See [`docs/wiring.md`](docs/wiring.md) for wiring details.
+![Prototype running the USB data logger](docs/images/prototype.jpg)
 
+*Prototype running the USB data logger: the OLED shows live temperature, humidity, the motion flag and the row count.*
 ### Firmware
 
 | Sketch | Purpose |
@@ -89,10 +79,11 @@ All data was recorded with this hardware, one sample every five seconds.
 
 Usable rows are counted after discarding the first 12 samples after every reboot. Notes:
 
-- Humidity in the reading-room session fell steadily from about 43% to 29% over 4.6 hours.
+- The reading-room session was recorded with the board connected to a laptop while running the offline firmware; the readings were extracted from the board's flash afterwards. Humidity fell steadily from about 43% to 29% over its 4.6 hours.
 - In the second session, 25 `t_ms` values were damaged in transit over USB serial; the measurements themselves were intact. The offline logger avoids this class of error by checksumming each stored record.
 - `classroom_raw_20261026.csv` was extracted without a start time, so its clock timestamps are approximate. Training does not use clock time.
 - A later full dump of the board's flash is a superset of the reading-room session and is deliberately not used for training, to avoid duplicate rows.
+- Per-session recording notes are in `data/raw/`.
 
 ## Machine-learning methodology
 
@@ -132,19 +123,19 @@ An observation is flagged when its score exceeds a threshold τ.
 
 ### Data split and threshold calibration
 
-Each session is cut into contiguous 15-minute blocks, which are assigned 70 / 15 / 15 to training, validation and test sets. The threshold is the 95th percentile of the reconstruction error on the validation blocks. Because neighbouring blocks are correlated, this test is optimistic about generalization to new days; a held-out whole-session evaluation is planned.
+The concatenated recordings are cut into contiguous 15-minute blocks (180 samples), which are assigned 70 / 15 / 15 to training, validation and test sets. The threshold is the 95th percentile of the reconstruction error on the validation blocks. Because neighbouring blocks are correlated, this test is optimistic about generalization to new days; a whole-session hold-out is planned.
 
 The 95th percentile is a calibration choice, not a guarantee that future normal observations will have a 5% false-positive rate. The INT8 model has a different error distribution and needs its own threshold.
 
 ### Training and quantization
 
-Training takes place on a computer using the recorded data. The trained model is converted to INT8 with a representative dataset, and the threshold is recomputed on the quantized model. The on-device pipeline must apply the same normalization parameters, handle quantization and dequantization, compute the reconstruction error and compare it with the INT8 threshold. TensorFlow Lite Micro is the intended runtime; running the model on the ESP32 remains a separate validation task.
+Training takes place on a computer using the recorded data. The trained model is converted to INT8 with a representative dataset, and the threshold is recomputed on the quantized model. The on-device pipeline must apply the same normalization parameters, handle quantization and dequantization, compute the reconstruction error and compare it with the INT8 threshold. TensorFlow Lite Micro is the intended runtime.
 
 See [`docs/methodology.md`](docs/methodology.md) for details.
 
 ## Preliminary results
 
-These results come from the four sessions above (9.6 hours) and are not a final evaluation.
+Results below correspond to the repository tag `v0.1` and the four sessions above (9.6 hours). They will be regenerated when sessions are added.
 
 ### Training
 
@@ -163,15 +154,22 @@ These results come from the four sessions above (9.6 hours) and are not a final 
 | 95th-percentile validation error (threshold) | 4.54 × 10⁻³ | 5.73 × 10⁻³ |
 | Model file size | — | 3,440 bytes |
 
-The per-sample error correlation between the float and INT8 models is 0.9219. Quantization raised the typical error substantially, so the INT8 model needs its own threshold. The 3,440 bytes is the model file only; it excludes firmware size, tensor-arena memory and inference latency, none of which has been measured yet.
+The per-sample error correlation between the float and INT8 models is 0.9219. Quantization raised the typical error substantially, so the INT8 model uses its own threshold. The 3,440 bytes is the model file only; firmware size, tensor-arena memory and inference latency will be measured on the device.
 
 ### False alarms on normal data
 
-The held-out normal test set gave a **28.2% false-positive rate** for the float model and also 28.2% for the INT8 model with its own threshold (30.1% if the float threshold is reused). This is too high for a reliable detector.
+The held-out normal test set gave a **28.2% false-positive rate** for the float model and also 28.2% for the INT8 model with its own threshold (30.1% if the float threshold is reused).
 
-The false alarms are not spread evenly. The three test blocks from the occupied-room session exceeded the threshold 5–6% of the time, close to the 5% target, while the last two test blocks (the final ~21 minutes of the reading-room session) exceeded it 67% and 100% of the time. That period is also the driest air in the dataset (mean humidity about 31% and 29% in its last two 15-minute blocks, versus 32% or higher in all earlier blocks). This is consistent with drift beyond the range seen in training, but it has not been verified.
+The false alarms are concentrated rather than spread evenly. The three test blocks from the classroom session exceeded the threshold 5–6% of the time, close to the 5% target, while the last two test blocks (the final ~21 minutes of the reading-room session) exceeded it 67% and 100% of the time. That period is also the driest air in the dataset (mean humidity about 31% and 29% in its last two 15-minute blocks, versus 32% or higher in all earlier blocks). This is consistent with drift beyond the range seen in training; it has not been verified yet.
 
-No detection rate or recall is reported, because a labeled real-world anomaly evaluation has not been completed.
+A detection rate and recall will be reported once the labeled controlled-disturbance recordings have been evaluated.
+
+## Scope and limitations
+
+- **Sensing scope:** temperature, humidity and a binary motion flag. The DHT11 is coarse (about ±2 °C and ±5 %RH accuracy; humidity changes in 1 %RH steps). A light sensor can be added through a configuration change.
+- **Data scope:** 9.6 hours across four sessions and two kinds of setting, without a full day/night cycle. The test uses blocks from the same sessions, so it is optimistic about new days and new places.
+- **Drift:** slow changes in the environment can move readings outside the training range and raise the false-alarm rate, as seen above.
+- **Evaluation status:** no labeled anomalies have been evaluated yet, so no detection rate is claimed.
 
 ## Repository structure
 
@@ -190,6 +188,7 @@ tinyml-env-anomaly/
 │   ├── check_session.py     # data-quality report for a session CSV
 │   └── fake_esp32.py        # synthetic data generator (development only)
 ├── docs/
+│   ├── images/              # figures
 │   ├── methodology.md
 │   └── wiring.md
 ├── data/raw/                # recorded sessions and notes
@@ -242,6 +241,8 @@ Review row count, timing gaps, reboots, missing fields and sensor ranges before 
 
 ### 4. Train the autoencoder
 
+The four recordings used for the reported results are in `data/raw/`.
+
 ```powershell
 $files = @(
     "data/raw/session_20261024_234018.csv",
@@ -261,42 +262,19 @@ Results should be close to those reported above; small numerical differences are
 python ml/convert_tflite.py --train $files --model-dir models/scratch
 ```
 
-This writes `model_int8.tflite`, `thresholds_int8.json`, `model_data.h` and `model_params.h` to the model directory. Successful conversion does not verify on-device inference.
+This writes `model_int8.tflite`, `thresholds_int8.json`, `model_data.h` and `model_params.h` to the model directory.
 
-## Development roadmap
+## Roadmap
 
 - [x] Sensor wiring and hardware bring-up
 - [x] Sensor-data logging (USB serial and standalone)
 - [x] Extraction and validation of recorded sessions
-- [x] Training a three-feature autoencoder on real data
+- [x] Three-feature autoencoder trained on real data
 - [x] INT8 TensorFlow Lite conversion with a recomputed threshold
-- [ ] Controlled disturbances with event timestamps and labels
-- [ ] Detection rate and false-alarm evaluation on labeled data
-- [ ] Comparison with PCA and Mahalanobis baselines
-- [ ] Whole-session hold-out evaluation and drift investigation
-- [ ] TensorFlow Lite Micro inference on the ESP32
-- [ ] On-device preprocessing, thresholding and alert behavior
-- [ ] Measured memory use and inference latency
-- [ ] Benefit of adding a light sensor
-
-## Known limitations
-
-- **Limited sensor set:** temperature, humidity and binary motion only; no light context.
-- **Sensor resolution:** the DHT11 is coarse (about ±2 °C and ±5 %RH accuracy; humidity in 1 %RH steps).
-- **Limited data:** 9.6 hours across four sessions, with no complete day/night cycle.
-- **Environmental drift:** one session shows humidity falling out of the range seen in training, and the model does not currently handle this.
-- **Optimistic test split:** neighbouring blocks of the same session end up in different sets.
-- **High false-positive rate:** 28.2% on held-out normal data, so reliable detection has not been demonstrated.
-- **No labeled anomaly benchmark yet:** no recall or detection rate is reported.
-- **No verified on-device inference:** the exported INT8 model has not been run on the ESP32.
-- **Unmeasured embedded resources:** firmware size, tensor-arena memory and latency are unknown.
-- **Quantization effects:** INT8 conversion changes the error distribution and needs its own threshold.
-
-## Future work
-
-1. Collect and label controlled environmental disturbances.
-2. Investigate false positives across sessions and drift.
-3. Compare the autoencoder with lightweight statistical baselines.
-4. Validate float and INT8 behavior on the target hardware.
-5. Measure the real embedded memory and latency footprint.
-6. Evaluate whether additional sensing is worth its hardware cost.
+- [ ] Labeled controlled-disturbance recordings
+- [ ] Detection-rate and false-alarm evaluation on labeled data
+- [ ] PCA and Mahalanobis baselines
+- [ ] Whole-session hold-out evaluation and drift analysis
+- [ ] TensorFlow Lite Micro inference on the ESP32, checked against the Python INT8 model
+- [ ] Measured RAM, flash and inference latency
+- [ ] Longer multi-day recordings; optional light sensor

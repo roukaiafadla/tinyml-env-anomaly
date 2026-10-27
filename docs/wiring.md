@@ -7,7 +7,7 @@ Target board: ESP32 DevKit (30-pin, "ESP32 Dev Module" in Arduino IDE).
 | Component | Component pin | ESP32 pin | Notes |
 |---|---|---|---|
 | DHT11 module (3-pin) | `-` | GND | Pin order with pins up: `-`, power, `S` |
-| DHT11 module | middle | 3V3 | Pull-up is on the module |
+| DHT11 module | middle | 3V3 | No external pull-up resistor was needed |
 | DHT11 module | `S` | GPIO4 (D4) | |
 | PIR (HC-SR501) | VCC | VIN (5 V) | Needs 5 V to operate |
 | PIR (HC-SR501) | OUT | GPIO27 (D27) | OUT is 3.3 V logic, safe for the ESP32 |
@@ -16,17 +16,9 @@ Target board: ESP32 DevKit (30-pin, "ESP32 Dev Module" in Arduino IDE).
 | OLED SSD1306 | VCC | 3V3 | |
 | OLED SSD1306 | SCL | GPIO22 (D22) | I2C address 0x3C |
 | OLED SSD1306 | SDA | GPIO21 (D21) | |
-| Red LED | Anode (long leg) via 220 ohm resistor | GPIO26 (D26) | |
+| Red LED | Anode (long leg) via 220 ohm resistor | GPIO26 (D26) | Heartbeat blink in the logging firmware; planned anomaly alert | |
 | Red LED | Cathode (short leg) | GND | |
 
-## Not used: light sensor
-
-The project was designed with a fourth feature (ambient light via an LDR module on
-ADC1, GPIO34). No LDR module was available: the module in the kit turned out to be
-an IR obstacle-avoidance sensor (digital output only), which cannot provide an
-analog light level. The firmware and training code therefore use three features.
-Adding light later only requires wiring an LDR module's analog output to GPIO34,
-extending the sketch, and passing `--features` to the training script.
 
 ## Power
 
@@ -41,6 +33,7 @@ but its output pin is driven at 3.3 V, so no level shifting is required.
 
 **Strapping and flash pins avoided.** GPIO 0, 2, 5, 12, 15 influence boot mode and
 GPIO 6-11 are wired to the internal flash. None are used here.
+**GPIO34 (ADC1) kept free.** Reserved for an optional analog light sensor. ADC1 is used because ADC2 conflicts with the Wi-Fi driver.
 
 ## PIR Configuration (HC-SR501)
 

@@ -10,3 +10,4 @@ models/synthetic/
 models/scratch/
 models/*/saved_model/
 *.bad
+data/raw/offline_*.csv
