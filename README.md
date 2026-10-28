@@ -55,10 +55,12 @@ This project investigates whether a compact autoencoder can learn typical enviro
 | SSD1306 128×64 OLED | Status display | I²C, GPIO 21/22 |
 | LED with 220 Ω resistor | Heartbeat in the loggers; planned anomaly alert | GPIO 26 |
 
-The initial design included an LDR light sensor, but no usable module was available, so the current implementation uses three input features instead of four. See [`docs/wiring.md`](docs/wiring.md) for wiring details.
+The initial design included an LDR light sensor, but no usable module was available, so the current implementation uses three input features instead of four. See [`docs/wiring.md`](docs/wiring.md) ...for wiring details.
+
 ![Prototype running the USB data logger](docs/images/prototype.jpg)
 
 *Prototype running the USB data logger: the OLED shows live temperature, humidity, the motion flag and the row count.*
+
 ### Firmware
 
 | Sketch | Purpose |
